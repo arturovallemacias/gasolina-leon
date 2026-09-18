@@ -1,0 +1,63 @@
+# Recolecta los precios y republica el sitio, solo, en la nube.
+# Tu computadora no necesita estar prendida.
+name: precios
+
+on:
+  schedule:
+    # Los 6 cortes oficiales en hora de México (UTC-6), escritos en UTC.
+    # 01:00 -> 07:00 | 06:00 -> 12:00 | 08:00 -> 14:00
+    # 11:00 -> 17:00 | 15:00 -> 21:00 | 19:00 -> 01:00 del día siguiente
+    - cron: "10 7,12,14,17,21,1 * * *"
+  workflow_dispatch:        # además, un botón para dispararlo a mano
+
+permissions:
+  contents: write           # para guardar los snapshots en el repo
+  pages: write
+  id-token: write
+
+concurrency:
+  group: precios
+  cancel-in-progress: false
+
+jobs:
+  recolectar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install requests pandas pyarrow
+
+      - name: Bajar el corte de ahora
+        run: python leon_gas.py bajar --data ./data
+
+      - name: Guardar el snapshot en el repo
+        run: |
+          git config user.name  "recolector"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --staged --quiet && exit 0
+          git commit -m "precios $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git pull --rebase --autostash || true   # por si el repo avanzó mientras tanto
+          git push
+
+      - name: Armar el sitio
+        run: python leon_gas.py sitio --data ./data --carpeta ./sitio --no-servidor
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./sitio
+
+  publicar:
+    needs: recolectar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
