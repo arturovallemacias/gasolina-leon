@@ -407,6 +407,9 @@ HTML = '''<!DOCTYPE html>
   .leaflet-control-attribution { background:rgba(255,255,255,0.75) !important;
     font-size:9px !important; }
 
+  .pie { margin-top:26px; font-size:0.75rem; color:var(--muted); line-height:1.5; }
+  .pie p { margin:0 0 7px; }
+
   @media (max-width:420px) {
     h1 { font-size:1.2rem; }
     .kpi .v { font-size:1.15rem; }
@@ -485,6 +488,15 @@ HTML = '''<!DOCTYPE html>
       <tbody id="tbody"></tbody>
     </table>
   </div>
+
+  <footer class="pie">
+    <p>Precios publicados por la Comisión Nacional de Energía. Esta app no es oficial
+       y los precios pueden cambiar sin aviso: confirma en la estación.</p>
+    <p id="avisoMedicion" hidden>Contamos visitas de forma anónima para saber si la app
+       le sirve a la gente. No guardamos tu ubicación, tu nombre ni nada que te
+       identifique. Tu ubicación se usa solo en tu teléfono, para ordenar el mapa,
+       y nunca sale de él.</p>
+  </footer>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -714,6 +726,7 @@ document.getElementById("btnGeo").addEventListener("click", () => {
     p => {
       miPos = { lat: p.coords.latitude, lon: p.coords.longitude };
       barra.hidden = true;                    // ya no hace falta el botón
+      medir("uso", { que: "ubicacion" });     // sin las coordenadas, solo el hecho
       msg.textContent = "Listo. Los colores ahora comparan solo entre tus "
         + DATA.params.cercanas + " gasolineras más cercanas.";
       render(current);
@@ -736,7 +749,10 @@ function arranca(datos) {
   document.getElementById("fuelFilter").innerHTML = Object.entries(DATA.fuels)
     .map(([k,v]) => `<button data-fuel="${k}" aria-pressed="false">${v.label}</button>`).join("");
   document.querySelectorAll("#fuelFilter button").forEach(b =>
-    b.addEventListener("click", () => render(b.dataset.fuel)));
+    b.addEventListener("click", () => {
+      render(b.dataset.fuel);
+      medir("uso", { que: "combustible", valor: b.dataset.fuel });
+    }));
 
   current = Object.keys(DATA.fuels)[0];
   render(current);
@@ -752,6 +768,65 @@ if (DATA_EMBEBIDA) {
       document.getElementById("sub").textContent =
         "No pude cargar los precios. Revisa tu conexión y vuelve a entrar.";
     });
+}
+
+// ---- medición anónima -----------------------------------------------------
+// Qué se manda: un identificador aleatorio (para saber si alguien VUELVE, que es
+// la única señal que de verdad dice si la app sirve), si entró instalada o por el
+// navegador, el tipo de aparato, y cuánto tiempo estuvo.
+// Qué NUNCA se manda: la ubicación del usuario, su IP cruda, su nombre ni nada
+// que lo identifique. La ubicación se calcula en su teléfono y ahí se queda.
+const MEDICION = "__MEDICION__";
+let tInicio = Date.now(), enviadoCierre = false;
+
+function idAnonimo() {
+  try {
+    let id = localStorage.getItem("visitante");
+    if (!id) {
+      id = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 12);
+      localStorage.setItem("visitante", id);
+    }
+    return id;
+  } catch (e) { return "sin-id"; }
+}
+
+function aparato() {
+  const u = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(u)) return "iphone";
+  if (/Android/.test(u)) return /Mobile/.test(u) ? "android" : "android-tablet";
+  return "escritorio";
+}
+
+function medir(evento, extra) {
+  if (!MEDICION) return;
+  const cuerpo = JSON.stringify(Object.assign({
+    evento,
+    visitante: idAnonimo(),
+    instalada: matchMedia("(display-mode: standalone)").matches || navigator.standalone === true,
+    aparato: aparato(),
+    hora: new Date().getHours(),          // hora local, para saber CUÁNDO la usan
+    dia: new Date().getDay(),
+    ancho: window.innerWidth,
+    de: document.referrer ? new URL(document.referrer).hostname : "",
+  }, extra || {}));
+  try {
+    if (navigator.sendBeacon) navigator.sendBeacon(MEDICION, cuerpo);
+    else fetch(MEDICION, { method:"POST", body:cuerpo, keepalive:true });
+  } catch (e) {}
+}
+
+if (MEDICION) {
+  document.getElementById("avisoMedicion").hidden = false;
+  medir("visita");
+  // El tiempo de permanencia se manda cuando la pestaña se oculta: es el único
+  // momento confiable, porque los teléfonos no avisan cuando cierran.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden" && !enviadoCierre) {
+      enviadoCierre = true;
+      medir("salida", { segundos: Math.round((Date.now() - tInicio) / 1000) });
+    }
+  });
+  window.addEventListener("appinstalled", () => medir("instalacion"));
 }
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
@@ -932,7 +1007,9 @@ jobs:
           git push
 
       - name: Armar el sitio
-        run: python leon_gas.py sitio --data ./data --carpeta ./sitio --no-servidor
+        run: |
+          python leon_gas.py sitio --data ./data --carpeta ./sitio --no-servidor \
+            --medicion "${{ vars.MEDICION_URL }}"
 
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -1050,7 +1127,8 @@ def _icono(lado: int) -> bytes:
     return _png(lado, lado, px)
 
 
-def sitio(data_dir: Path, carpeta: Path, radio, tanque, rend, cercanas) -> Path:
+def sitio(data_dir: Path, carpeta: Path, radio, tanque, rend, cercanas,
+          medicion: str = "") -> Path:
     """Arma la carpeta lista para subir. A diferencia del tablero local, aquí
     los datos van en datos.json aparte: así cada corte solo reemplaza ese
     archivo y la página no se toca."""
@@ -1060,7 +1138,9 @@ def sitio(data_dir: Path, carpeta: Path, radio, tanque, rend, cercanas) -> Path:
     datos = _payload(df, radio, tanque, rend, cercanas)
     (carpeta / "datos.json").write_text(
         json.dumps(datos, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    (carpeta / "index.html").write_text(HTML.replace("__PAYLOAD__", "null"), encoding="utf-8")
+    (carpeta / "index.html").write_text(
+        HTML.replace("__PAYLOAD__", "null").replace("__MEDICION__", medicion or ""),
+        encoding="utf-8")
     print(f"  datos.json ({(carpeta / 'datos.json').stat().st_size/1024:.0f} KB) + index.html")
 
     (carpeta / "manifest.webmanifest").write_text(
@@ -1198,8 +1278,10 @@ def _iconos(carpeta: Path) -> None:
 def tablero(data_dir: Path, salida: Path, radio, tanque, rend, cercanas) -> Path:
     df = _cargar(data_dir)
     datos = _payload(df, radio, tanque, rend, cercanas)
-    salida.write_text(HTML.replace("__PAYLOAD__", json.dumps(datos, ensure_ascii=False)),
-                      encoding="utf-8")
+    salida.write_text(
+        HTML.replace("__PAYLOAD__", json.dumps(datos, ensure_ascii=False))
+            .replace("__MEDICION__", ""),      # el tablero local nunca mide
+        encoding="utf-8")
     print(f"tablero -> {salida.resolve()}")
     return salida
 
@@ -1266,6 +1348,8 @@ def main():
     ap.add_argument("--inspeccionar", action="store_true", help="solo imprime el esquema XML y sale")
     ap.add_argument("--carpeta", default="./sitio",
                     help="carpeta de salida del sitio PWA (acción 'sitio')")
+    ap.add_argument("--medicion", default="",
+                    help="URL que recibe los eventos anónimos de uso (acción 'sitio')")
     ap.add_argument("--puerto", type=int, default=8000, help="puerto del servidor local")
     ap.add_argument("--no-abrir", action="store_true", help="no abrir el navegador")
     ap.add_argument("--no-servidor", action="store_true",
@@ -1286,7 +1370,8 @@ def main():
         return
 
     if a.accion == "sitio":
-        html = sitio(raiz / scope, Path(a.carpeta), a.radio, a.tanque, a.rendimiento, a.cercanas)
+        html = sitio(raiz / scope, Path(a.carpeta), a.radio, a.tanque, a.rendimiento,
+                     a.cercanas, a.medicion)
     elif a.accion in ("todo", "tablero"):
         tablero(raiz / scope, html, a.radio, a.tanque, a.rendimiento, a.cercanas)
 
