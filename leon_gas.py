@@ -1065,13 +1065,127 @@ def sitio(data_dir: Path, carpeta: Path, radio, tanque, rend, cercanas) -> Path:
 
     (carpeta / "manifest.webmanifest").write_text(
         json.dumps(MANIFEST, ensure_ascii=False, indent=2), encoding="utf-8")
-    (carpeta / "sw.js").write_text(SW_JS.replace("__VER__", "2"), encoding="utf-8")
 
-    # Íconos: si pones los tuyos como icon-192.png / icon-512.png junto a este
-    # script, se usan esos. Si no, se dibuja uno provisional.
+    _iconos(carpeta)
+
+    # La versión del caché sale de un hash del contenido: si cambias el ícono o
+    # la página, cambia sola y los teléfonos tiran lo viejo. Sin esto, la gente
+    # se queda con el ícono anterior para siempre.
+    import hashlib
+    h = hashlib.sha1()
+    for nombre in ("index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"):
+        h.update((carpeta / nombre).read_bytes())
+    ver = h.hexdigest()[:10]
+    (carpeta / "sw.js").write_text(SW_JS.replace("__VER__", ver), encoding="utf-8")
+    print(f"  version del cache: {ver}")
+
+    print(f"\n  Carpeta lista para subir: {carpeta.resolve()}")
+    return carpeta / "index.html"
+
+
+# ------------------------------------------------------------------ íconos
+
+def _leer_png(ruta: Path):
+    """Lee un PNG de 8 bits (RGB o RGBA, sin entrelazado) y devuelve
+    (ancho, alto, píxeles RGBA). Sin Pillow."""
+    import struct
+    import zlib
+
+    d = ruta.read_bytes()
+    if d[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("no es un PNG")
+
+    i, idat, w = 8, bytearray(), None
+    while i < len(d):
+        ln = struct.unpack(">I", d[i:i + 4])[0]
+        tipo = d[i + 4:i + 8]
+        datos = d[i + 8:i + 8 + ln]
+        if tipo == b"IHDR":
+            w, hgt, prof, color, _, _, entre = struct.unpack(">IIBBBBB", datos)
+            if prof != 8 or color not in (2, 6) or entre:
+                raise ValueError("necesito un PNG de 8 bits RGB o RGBA sin entrelazar")
+            canales = 4 if color == 6 else 3
+        elif tipo == b"IDAT":
+            idat += datos
+        elif tipo == b"IEND":
+            break
+        i += 12 + ln
+
+    crudo = zlib.decompress(bytes(idat))
+    linea = w * canales
+    px = bytearray(w * hgt * 4)
+    prev = bytearray(linea)
+    pos = 0
+    for y in range(hgt):
+        filtro = crudo[pos]; pos += 1
+        fila = bytearray(crudo[pos:pos + linea]); pos += linea
+        for x in range(linea):                      # deshacer el filtro PNG
+            a = fila[x - canales] if x >= canales else 0
+            b = prev[x]
+            c = prev[x - canales] if x >= canales else 0
+            if filtro == 1:   fila[x] = (fila[x] + a) & 0xFF
+            elif filtro == 2: fila[x] = (fila[x] + b) & 0xFF
+            elif filtro == 3: fila[x] = (fila[x] + (a + b) // 2) & 0xFF
+            elif filtro == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                fila[x] = (fila[x] + pred) & 0xFF
+        prev = fila
+        for x in range(w):
+            s, t = x * canales, (y * w + x) * 4
+            px[t:t + 3] = fila[s:s + 3]
+            px[t + 3] = fila[s + 3] if canales == 4 else 255
+    return w, hgt, px
+
+
+def _escalar(w: int, h: int, px: bytearray, lado: int) -> bytearray:
+    """Reescala a lado×lado promediando por área (queda limpio al reducir)."""
+    out = bytearray(lado * lado * 4)
+    for y in range(lado):
+        y0, y1 = y * h // lado, max(y * h // lado + 1, (y + 1) * h // lado)
+        for x in range(lado):
+            x0, x1 = x * w // lado, max(x * w // lado + 1, (x + 1) * w // lado)
+            acc = [0, 0, 0, 0]; n = 0
+            for sy in range(y0, y1):
+                base = sy * w * 4
+                for sx in range(x0, x1):
+                    p = base + sx * 4
+                    for c in range(4):
+                        acc[c] += px[p + c]
+                    n += 1
+            t = (y * lado + x) * 4
+            for c in range(4):
+                out[t + c] = acc[c] // n
+    return out
+
+
+def _iconos(carpeta: Path) -> None:
+    """Los íconos de la app, por orden de preferencia:
+
+      1. icono.png junto al script  -> se reescala a los dos tamaños
+      2. icon-192.png / icon-512.png junto al script -> se copian tal cual
+      3. si no hay nada, se dibuja uno provisional
+    """
+    raiz = Path(__file__).resolve().parent
+    fuente = raiz / "icono.png"
+
+    if fuente.exists():
+        try:
+            w, h, px = _leer_png(fuente)
+            if w != h:
+                print(f"  ! icono.png no es cuadrado ({w}x{h}); se va a deformar")
+            for lado in (192, 512):
+                datos = px if (w == lado and h == lado) else _escalar(w, h, px, lado)
+                (carpeta / f"icon-{lado}.png").write_bytes(_png(lado, lado, datos))
+                print(f"  icono tuyo (de icono.png) -> icon-{lado}.png")
+            return
+        except Exception as e:
+            print(f"  ! no pude leer icono.png ({e}); uso los de respaldo")
+
     for lado in (192, 512):
         nombre = f"icon-{lado}.png"
-        propio = Path(__file__).resolve().parent / nombre
+        propio = raiz / nombre
         destino = carpeta / nombre
         if propio.exists() and propio.resolve() != destino.resolve():
             destino.write_bytes(propio.read_bytes())
@@ -1079,9 +1193,6 @@ def sitio(data_dir: Path, carpeta: Path, radio, tanque, rend, cercanas) -> Path:
         else:
             destino.write_bytes(_icono(lado))
             print(f"  icono provisional -> {nombre}")
-
-    print(f"\n  Carpeta lista para subir: {carpeta.resolve()}")
-    return carpeta / "index.html"
 
 
 def tablero(data_dir: Path, salida: Path, radio, tanque, rend, cercanas) -> Path:
