@@ -46,8 +46,9 @@ jobs:
           git push
 
       - name: Armar el sitio
-        run: python leon_gas.py sitio --data ./data --carpeta ./sitio --no-servidor
-
+        run: |
+          python leon_gas.py sitio --data ./data --carpeta ./sitio --no-servidor \
+            --medicion "${{ vars.MEDICION_URL }}"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ./sitio
