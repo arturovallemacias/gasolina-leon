@@ -221,136 +221,202 @@ def _payload(df: pd.DataFrame, radio, tanque, rend, cercanas) -> dict:
 
 # ======================================================================= HTML
 
-HTML = """<!DOCTYPE html>
+HTML = '''<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gasolina en León</title>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#2a78d6">
+<meta name="theme-color" content="#0c1f18">
 <meta name="description" content="Dónde está más barata la gasolina en León hoy, y cuánto te queda en la bolsa si te mueves.">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Gasolina León">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="icon-192.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
+  /* Tema de León: verde de campo y dorado de cuero. Un solo tema, siempre
+     oscuro — es identidad, no preferencia del sistema. Todos los contrastes
+     de texto verificados contra WCAG (el más bajo, 5.3:1). */
   :root {
-    color-scheme: light;
-    --surface-1:#fcfcfb; --plane:#f9f9f7;
-    --text-primary:#0b0b0b; --text-secondary:#52514e; --muted:#898781;
-    --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
-    --s0:#86b6ef; --s1:#3987e5; --s2:#256abf; --s3:#104281; --ring:#fcfcfb;
-    /* Rampa del MAPA: diverging barato <-> caro. No cambia con el tema, porque
-       el mapa siempre es claro y los puntos se leen contra el tile.
-       Azul (barata) <-> rojo (cara): bajo daltonismo se separan a ΔE 23.8,
-       contra 8.4 de un verde azulado y 1.0 de un verde puro — que sería
-       literalmente el mismo color para ~8% de los hombres. */
+    color-scheme: dark;
+    --plane:#0c1f18;          /* fondo de la página */
+    --surface-1:#143025;      /* tarjetas */
+    --surface-2:#1b3d2f;      /* filas, realces suaves */
+    --ink:#f4f1e8;            /* texto principal */
+    --ink-2:#b9c7ba;          /* texto secundario */
+    --muted:#8fa396;          /* etiquetas tenues */
+    --oro:#d9a441;            /* acento: botones, cifras que importan */
+    --oro-ink:#1a1205;        /* texto encima del dorado */
+    --verde:#7fc79a;          /* buenas noticias */
+    --linea:rgba(244,241,232,0.12);
+
+    /* Rampa del mapa. NO sigue el tema: los puntos van sobre tiles claros,
+       y azul<->rojo es el par que aguanta el daltonismo (ΔE 23.8). */
     --barato:#2a78d6; --neutro:#dcdad3; --caro:#d03b3b; --mring:#ffffff;
-    --apagado:#a8a69e;   /* las que quedan fuera del radio de interés */
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      color-scheme: dark;
-      --surface-1:#1a1a19; --plane:#0d0d0d;
-      --text-primary:#ffffff; --text-secondary:#c3c2b7; --muted:#898781;
-      --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
-      --s0:#184f95; --s1:#256abf; --s2:#3987e5; --s3:#86b6ef; --ring:#1a1a19;
-    }
-    /* El mapa sigue siendo claro; solo lo bajamos de brillo para que no deslumbre. */
-    :root:not([data-theme="light"]) .leaflet-tile-pane { filter:brightness(0.88) saturate(0.9); }
+    --apagado:#a8a69e;
   }
   * { box-sizing:border-box; }
-  body { margin:0; padding:24px 16px 56px; background:var(--plane); color:var(--text-primary);
-         font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
-  .wrap { max-width:1080px; margin:0 auto; }
-  h1 { font-size:1.5rem; margin:0 0 4px; letter-spacing:-0.01em; }
-  .sub { color:var(--text-secondary); font-size:0.875rem; margin:0 0 20px; }
-  .filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:20px; }
-  .filters button { font:inherit; font-size:0.875rem; padding:7px 14px; cursor:pointer;
-    background:var(--surface-1); color:var(--text-secondary);
-    border:1px solid var(--border); border-radius:999px; }
-  .filters button[aria-pressed="true"] { background:var(--s2); color:#fff; border-color:transparent; font-weight:600; }
-  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
-  .kpi { background:var(--surface-1); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
-  .kpi .k { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; }
-  .kpi .v { font-size:1.6rem; margin-top:4px; line-height:1.1; }
-  .kpi .n { font-size:0.8rem; color:var(--text-secondary); margin-top:3px;
-            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .card { background:var(--surface-1); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:20px; }
-  .card h2 { font-size:1rem; margin:0 0 2px; }
-  .card p.hint { font-size:0.8125rem; color:var(--text-secondary); margin:0 0 14px; }
-  #map { height:520px; border-radius:8px; z-index:0; background:#eceae4; }
-  .leaflet-container { background:#eceae4; }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) #map,
-    :root:not([data-theme="light"]) .leaflet-container { background:#26262a; }
+  html, body { overflow-x:hidden; max-width:100%; }
+  body {
+    margin:0; padding:20px 14px 44px;
+    background:var(--plane); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-text-size-adjust:100%;
   }
-  .legend { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:0.75rem; color:var(--text-secondary); }
-  .legend .ramp { flex:0 1 220px; height:10px; border-radius:2px;
-    background:linear-gradient(90deg,var(--barato),var(--neutro),var(--caro)); }
-  /* Etiqueta de precio pegada a cada punto */
-  .leaflet-tooltip.precio-tag {
-    background:rgba(255,255,255,0.92); border:none; box-shadow:none; color:#0b0b0b;
-    font-size:11px; font-weight:700; font-variant-numeric:tabular-nums;
-    padding:1px 4px; border-radius:3px; margin-left:2px;
-  }
-  .leaflet-tooltip.precio-tag::before { display:none; }
-  /* Invitación a guardar la app en el teléfono */
-  .instalar { display:none; gap:12px; align-items:center; margin-bottom:16px; padding:12px 14px;
-    background:var(--surface-1); border:1px solid var(--border); border-left:4px solid var(--s2);
-    border-radius:10px; }
+  .wrap { max-width:940px; margin:0 auto; }
+  h1 { font-size:1.4rem; margin:0 0 3px; letter-spacing:-0.01em; }
+  .sub { color:var(--ink-2); font-size:0.8125rem; margin:0 0 18px; line-height:1.45; }
+
+  /* ---------- invitación a instalar ---------- */
+  .instalar { display:none; gap:10px; align-items:center; margin-bottom:16px;
+    padding:12px 14px; background:var(--surface-1); border:1px solid var(--linea);
+    border-left:4px solid var(--oro); border-radius:12px; }
   .instalar.ver { display:flex; }
-  .instalar .txt { flex:1 1 200px; font-size:0.8125rem; color:var(--text-secondary); line-height:1.4; }
-  .instalar .txt b { display:block; color:var(--text-primary); font-size:0.9rem; margin-bottom:1px; }
-  .instalar button { font:inherit; font-size:0.875rem; font-weight:600; padding:8px 16px;
-    cursor:pointer; background:var(--s2); color:#fff; border:none; border-radius:8px; white-space:nowrap; }
-  .instalar .cerrar { background:none; color:var(--muted); font-size:1.1rem; padding:4px 8px; font-weight:400; }
+  .instalar .txt { flex:1 1 160px; font-size:0.8125rem; color:var(--ink-2); line-height:1.4; }
+  .instalar .txt b { display:block; color:var(--ink); font-size:0.9rem; margin-bottom:1px; }
+  .instalar button { font:inherit; font-size:0.875rem; font-weight:700; padding:9px 16px;
+    cursor:pointer; background:var(--oro); color:var(--oro-ink); border:none;
+    border-radius:9px; white-space:nowrap; }
+  .instalar .cerrar { background:none; color:var(--muted); font-size:1.1rem;
+    padding:4px 6px; font-weight:400; }
 
-  .geobar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
-  .geobar button { font:inherit; font-size:0.875rem; font-weight:600; padding:8px 16px; cursor:pointer;
-    background:var(--s2); color:#fff; border:none; border-radius:8px; }
-  .geobar span { font-size:0.8125rem; color:var(--text-secondary); }
-  .yo { font-weight:700; }
-  table { width:100%; border-collapse:collapse; font-size:0.875rem; }
-  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--grid); }
-  th { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; font-weight:600; }
+  /* ---------- filtros ---------- */
+  .filters { display:flex; gap:8px; margin-bottom:16px; }
+  .filters button { flex:1; font:inherit; font-size:0.875rem; padding:10px 8px;
+    cursor:pointer; background:var(--surface-1); color:var(--ink-2);
+    border:1px solid var(--linea); border-radius:999px; }
+  .filters button[aria-pressed="true"] { background:var(--oro); color:var(--oro-ink);
+    border-color:transparent; font-weight:700; }
+
+  /* ---------- cifras de cabecera ---------- */
+  .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+  .kpi { background:var(--surface-1); border:1px solid var(--linea); border-radius:12px;
+    padding:12px; min-width:0; }
+  .kpi .k { font-size:0.7rem; color:var(--muted); text-transform:uppercase;
+    letter-spacing:0.05em; line-height:1.25; }
+  .kpi .v { font-size:1.4rem; margin-top:5px; line-height:1.1; }
+  .kpi .n { font-size:0.75rem; color:var(--ink-2); margin-top:3px; line-height:1.3;
+    overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  .kpi.barata .v { color:var(--verde); }
+
+  /* ---------- tarjetas ---------- */
+  .card { background:var(--surface-1); border:1px solid var(--linea); border-radius:14px;
+    padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:1.05rem; margin:0 0 3px; }
+  .card p.hint { font-size:0.8125rem; color:var(--ink-2); margin:0 0 14px; line-height:1.45; }
+
+  /* ---------- mapa ---------- */
+  .geobar { margin-bottom:12px; }
+  .geobar button { width:100%; font:inherit; font-size:1rem; font-weight:700;
+    padding:13px 16px; cursor:pointer; background:var(--oro); color:var(--oro-ink);
+    border:none; border-radius:10px; }
+  .geomsg { font-size:0.8125rem; color:var(--ink-2); margin:10px 0 0; line-height:1.4; }
+  #map { height:58vh; min-height:320px; border-radius:10px; z-index:0; background:#e8e6e0; }
+  .leaflet-container { background:#e8e6e0; font-family:inherit; }
+  .escala { display:flex; align-items:center; gap:8px; margin-top:12px;
+    font-size:0.75rem; color:var(--ink-2); }
+  .escala .ramp { flex:1; height:9px; border-radius:99px;
+    background:linear-gradient(90deg,var(--barato),var(--neutro),var(--caro)); }
+
+  /* ---------- cuánto cambia (el número grande) ---------- */
+  .hero { text-align:center; padding:6px 0 2px; }
+  .hero .cifra { font-size:3rem; line-height:1; color:var(--oro); font-weight:700;
+    letter-spacing:-0.02em; }
+  .hero .pie { font-size:0.9rem; color:var(--ink-2); margin:10px auto 0; max-width:30em;
+    line-height:1.5; }
+  .rango { margin-top:20px; }
+  .rango .barra { height:12px; border-radius:99px;
+    background:linear-gradient(90deg,var(--barato),var(--neutro),var(--caro)); position:relative; }
+  .rango .marca { position:absolute; top:-4px; width:3px; height:20px; border-radius:2px;
+    background:var(--ink); box-shadow:0 0 0 2px var(--surface-1); }
+  .rango .pies { display:flex; justify-content:space-between; margin-top:9px;
+    font-size:0.75rem; color:var(--muted); }
+  .rango .pies b { display:block; color:var(--ink); font-size:0.95rem;
+    font-variant-numeric:tabular-nums; }
+  .rango .pies .med { text-align:center; }
+  .rango .pies .der { text-align:right; }
+
+  /* ---------- consejos de movimiento ---------- */
+  .consejos { display:grid; grid-template-columns:1fr; gap:12px; }
+  @media (min-width:700px) { .consejos { grid-template-columns:1fr 1fr; } }
+  .consejo { background:var(--surface-2); border-radius:12px; padding:14px; }
+  .consejo .lab { font-size:0.7rem; color:var(--muted); text-transform:uppercase;
+    letter-spacing:0.05em; }
+  .consejo .est { display:flex; justify-content:space-between; align-items:baseline;
+    gap:10px; margin-top:2px; }
+  .consejo .est .nom { font-size:0.95rem; min-width:0; overflow-wrap:anywhere; }
+  .consejo .est .pre { font-size:0.95rem; font-variant-numeric:tabular-nums;
+    white-space:nowrap; color:var(--ink-2); }
+  .consejo .flecha { font-size:0.8125rem; color:var(--muted); margin:9px 0 7px;
+    padding-left:2px; }
+  .consejo .dest .nom { font-weight:700; }
+  .consejo .dest .pre { color:var(--verde); font-weight:700; }
+  .consejo .total { display:flex; justify-content:space-between; align-items:baseline;
+    margin-top:12px; padding-top:10px; border-top:1px solid var(--linea); }
+  .consejo .total span { font-size:0.8125rem; color:var(--ink-2); }
+  .consejo .total b { font-size:1.35rem; color:var(--oro); font-variant-numeric:tabular-nums; }
+
+  /* ---------- lista desde tu ubicación ---------- */
+  .cerca { list-style:none; margin:0; padding:0; }
+  .cerca li { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    padding:12px 0; border-bottom:1px solid var(--linea); }
+  .cerca li:last-child { border-bottom:none; }
+  .cerca .izq { min-width:0; }
+  .cerca .nom { font-size:0.95rem; overflow-wrap:anywhere; }
+  .cerca .meta { font-size:0.8125rem; color:var(--ink-2); margin-top:3px;
+    font-variant-numeric:tabular-nums; }
+  .cerca .der { text-align:right; white-space:nowrap; }
+  .cerca .der b { font-size:1.05rem; color:var(--oro); font-variant-numeric:tabular-nums; }
+  .cerca .der small { display:block; font-size:0.7rem; color:var(--muted); }
+  .cerca .tuya .nom { color:var(--verde); font-weight:700; }
+
+  /* ---------- ranking ---------- */
+  table { width:100%; border-collapse:collapse; font-size:0.9rem; table-layout:fixed; }
+  th, td { text-align:left; padding:10px 6px; border-bottom:1px solid var(--linea); }
+  th { font-size:0.7rem; color:var(--muted); text-transform:uppercase;
+    letter-spacing:0.05em; font-weight:600; }
   td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .col-pos { width:2.2rem; } .col-pre { width:5.2rem; }
+  td.nom { overflow-wrap:anywhere; }
   tbody tr:last-child td { border-bottom:none; }
-  .pop { font-family:system-ui,sans-serif; font-size:0.8125rem; line-height:1.45; }
-  .pop b { display:block; font-size:0.9rem; margin-bottom:2px; }
-  .pop .big { font-size:1.15rem; font-variant-numeric:tabular-nums; }
-  .pop .save { margin-top:6px; padding-top:6px; border-top:1px solid #ddd; }
-  .pop .recibo { width:100%; margin-top:6px; font-variant-numeric:tabular-nums; border-collapse:collapse; }
-  .pop .recibo td { padding:1px 0; border:none; font-size:0.78rem; }
-  .pop .recibo td:last-child { text-align:right; padding-left:10px; }
-  .pop .recibo .tot td { border-top:1px solid #ccc; padding-top:3px; font-weight:700; }
+  tbody tr:first-child td { color:var(--verde); font-weight:700; }
 
-  /* ----- teléfono ----- */
-  .tablaScroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
-  .tablaScroll table { min-width:440px; }
-  .desliza { display:none; font-size:0.75rem; color:var(--muted); margin:6px 0 0; }
-  @media (max-width: 620px) {
-    body { padding:16px 12px 40px; }
-    .wrap { max-width:100%; }
-    h1 { font-size:1.25rem; }
-    .kpis { grid-template-columns:1fr 1fr; gap:8px; }
-    .kpi { padding:10px 12px; }
-    .kpi .v { font-size:1.25rem; }
-    .card { padding:12px; margin-bottom:14px; }
-    #map { height:62vh; min-height:340px; }
-    .geobar button { width:100%; padding:12px 16px; font-size:1rem; }
-    .filters button { flex:1 1 auto; text-align:center; }
-    th, td { padding:7px 8px; }
-    .desliza { display:block; }
+  /* ---------- globo del mapa ---------- */
+  .leaflet-popup-content-wrapper { background:var(--surface-1); color:var(--ink);
+    border-radius:12px; }
+  .leaflet-popup-tip { background:var(--surface-1); }
+  .leaflet-popup-content { margin:12px 14px; font-family:inherit; }
+  .pop b.tit { display:block; font-size:0.95rem; margin-bottom:3px; }
+  .pop .big { font-size:1.3rem; font-variant-numeric:tabular-nums; color:var(--ink); }
+  .pop .save { margin-top:9px; padding-top:9px; border-top:1px solid var(--linea);
+    font-size:0.8125rem; color:var(--ink-2); }
+  .pop .recibo { width:100%; margin-top:7px; font-variant-numeric:tabular-nums;
+    border-collapse:collapse; }
+  .pop .recibo td { padding:2px 0; border:none; font-size:0.8rem; color:var(--ink-2); }
+  .pop .recibo td:last-child { text-align:right; padding-left:12px; color:var(--ink); }
+  .pop .recibo .tot td { border-top:1px solid var(--linea); padding-top:5px;
+    font-weight:700; color:var(--oro); }
+  .leaflet-tooltip.precio-tag { background:rgba(255,255,255,0.93); border:none;
+    box-shadow:none; color:#12241c; font-size:11px; font-weight:700;
+    font-variant-numeric:tabular-nums; padding:1px 4px; border-radius:3px; }
+  .leaflet-tooltip.precio-tag::before { display:none; }
+  .leaflet-control-attribution { background:rgba(255,255,255,0.75) !important;
+    font-size:9px !important; }
+
+  @media (max-width:420px) {
+    h1 { font-size:1.2rem; }
+    .kpi .v { font-size:1.15rem; }
+    .kpi .k { font-size:0.64rem; }
+    .hero .cifra { font-size:2.5rem; }
   }
-  @supports (padding: max(0px)) {  /* muescas y barras de los teléfonos */
-    body { padding-left:max(12px, env(safe-area-inset-left));
-           padding-right:max(12px, env(safe-area-inset-right));
-           padding-bottom:max(40px, env(safe-area-inset-bottom)); }
+  @supports (padding: max(0px)) {
+    body { padding-left:max(14px, env(safe-area-inset-left));
+           padding-right:max(14px, env(safe-area-inset-right));
+           padding-bottom:max(44px, env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
@@ -370,70 +436,64 @@ HTML = """<!DOCTYPE html>
 
   <div class="card">
     <h2>Dónde está barata hoy</h2>
-    <p class="hint">Entre más intenso el punto, más barata contra la mediana de la ciudad. Haz clic en una estación para ver a dónde te conviene moverte.</p>
-    <div class="geobar">
+    <p class="hint">Los puntos azules son las baratas y los rojos las caras. Toca cualquiera para ver si te conviene moverte.</p>
+    <div class="geobar" id="geobar">
       <button id="btnGeo" type="button">Usar mi ubicación</button>
-      <span id="geoMsg">Te marco las que te van quedando más cerca y más baratas.</span>
     </div>
     <div id="map"></div>
-    <div class="legend">
-      <span id="legMin">La más barata</span>
-      <span class="ramp"></span>
-      <span id="legMax">La más cara</span>
+    <p class="geomsg" id="geoMsg" hidden></p>
+    <div class="escala">
+      <span id="legMin"></span><span class="ramp"></span><span id="legMax"></span>
     </div>
   </div>
 
   <div class="card" id="cardCerca" hidden>
-    <h2>Desde donde estás</h2>
-    <p class="hint">Cada renglón es una gasolinera que, respecto a todas las que quedan más cerca, es más barata que cualquiera de ellas. Si una no aparece, es porque hay otra más cerca <em>y</em> más barata — no tiene caso ir. La última columna compara contra quedarte en la que ya tienes más cerca: lo que pagarías de más ahí por una llenada, menos la gasolina que quemas en ir y volver.</p>
-    <div class="tablaScroll"><table>
-      <thead><tr>
-        <th>Estación</th><th class="num">Distancia</th><th class="num">Precio</th>
-        <th class="num">Te queda en la bolsa</th>
-      </tr></thead>
-      <tbody id="tcerca"></tbody>
-    </table></div>
-    <p class="desliza">Desliza la tabla de lado para ver todas las columnas →</p>
+    <h2>Las mejores desde donde estás</h2>
+    <p class="hint">Van de más cerca a más lejos, y cada una es más barata que todas las anteriores. Las que se saltan es porque hay otra más cerca y más barata: no tiene caso ir.</p>
+    <ul class="cerca" id="listaCerca"></ul>
   </div>
 
   <div class="card">
-    <h2>Qué tan dispersos están los precios</h2>
-    <p class="hint">Cada barra es el número de gasolineras en ese rango de precio. La línea marca la mediana.</p>
-    <div id="hist"></div>
+    <h2>¿Cuánto cambia de una gasolinera a otra?</h2>
+    <div class="hero">
+      <div class="cifra" id="heroCifra"></div>
+      <p class="pie" id="heroPie"></p>
+    </div>
+    <div class="rango">
+      <div class="barra"><div class="marca" id="marcaMed"></div></div>
+      <div class="pies">
+        <div><b id="rMin"></b>la más barata</div>
+        <div class="med"><b id="rMed"></b>lo normal</div>
+        <div class="der"><b id="rMax"></b>la más cara</div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
-    <h2>Dónde más te conviene moverte</h2>
-    <p class="hint">Si sueles cargar en la estación de la izquierda, esto es lo que te queda en la bolsa por llenar el mismo tanque en la de la derecha — ya restada la gasolina que quemas en ir y volver. No es un ahorro contra "lo normal": es contra esa estación en concreto, en una sola llenada.</p>
-    <div class="tablaScroll"><table>
-      <thead><tr>
-        <th>Si cargas en</th><th class="num">Pagas</th>
-        <th>Muévete a</th><th class="num">Paga</th>
-        <th class="num">km</th><th class="num">Ahorras</th>
-      </tr></thead>
-      <tbody id="tsave"></tbody>
-    </table></div>
-    <p class="desliza">Desliza la tabla de lado para ver todas las columnas →</p>
+    <h2>Si cargas aquí, mejor ve allá</h2>
+    <p class="hint">Los cambios que más te convienen hoy en toda la ciudad. La cifra dorada es lo que te queda en la bolsa por llenar el mismo tanque, ya restando la gasolina del desvío.</p>
+    <div class="consejos" id="consejos"></div>
   </div>
 
   <div class="card">
     <h2>Las 15 más baratas de hoy</h2>
-    <p class="hint">Ranking directo por precio de litro, sin considerar distancia.</p>
-    <div class="tablaScroll"><table>
-      <thead><tr><th>#</th><th>Estación</th><th class="num">Precio</th><th class="num">vs mediana</th></tr></thead>
+    <p class="hint">Por precio de litro, sin importar qué tan lejos queden.</p>
+    <table>
+      <thead><tr>
+        <th class="col-pos">#</th><th>Estación</th><th class="num col-pre">Precio</th>
+      </tr></thead>
       <tbody id="tbody"></tbody>
-    </table></div>
+    </table>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // Los datos vienen embebidos (modo local) o de datos.json (modo publicado).
-// En el publicado, la página nunca cambia y solo se reemplaza el JSON: por eso
-// el sitio se puede actualizar solo, sin volver a generar nada más.
 const DATA_EMBEBIDA = __PAYLOAD__;
 let DATA = null;
 
+const CENTRO_LEON = [21.1215, -101.6827];
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const mx  = n => "$" + n.toFixed(2);
 const mxr = n => "$" + Math.round(n).toLocaleString("es-MX");
@@ -442,107 +502,40 @@ const mxr = n => "$" + Math.round(n).toLocaleString("es-MX");
 const HAS_MAP = typeof L !== "undefined";
 let map = null;
 if (HAS_MAP) {
-  map = L.map("map", { scrollWheelZoom:false });
-
-  // Varios fondos, porque ninguno es confiable al 100%:
-  //  - CARTO empezó a exigir API key (marca de agua "API KEY REQUIRED").
-  //  - OpenStreetMap bloquea con 403 lo que no manda Referer, y un archivo
-  //    abierto con file:// no manda ninguno. Sírvelo por HTTP y sí funciona:
-  //        python -m http.server 8000
-  //    y abre http://localhost:8000/leon_hoy.html
-  //  - "Sin fondo" siempre funciona: los puntos solos ya dibujan la ciudad.
-  const esriAttr = 'Tiles &copy; Esri';
-  const fondos = {
-    "Calles (Esri)": L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19, attribution: esriAttr }),
-    "Gris claro (Esri)": L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 16, attribution: esriAttr }),
-    "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }),
-    "Sin fondo": L.tileLayer(""),
-  };
-  // Si un tile viene con error (403, bloqueo, etc.) lo escondemos en vez de
-  // tapizar el mapa con la imagen de "Access blocked" del proveedor.
-  Object.values(fondos).forEach(capa =>
-    capa.on("tileerror", ev => { if (ev.tile) ev.tile.style.visibility = "hidden"; }));
-
-  fondos["Calles (Esri)"].addTo(map);
-  L.control.layers(fondos, null, { position: "topright", collapsed: false }).addTo(map);
+  map = L.map("map", { scrollWheelZoom:false, zoomControl:true });
+  map.setView(CENTRO_LEON, 12);
+  // Un solo fondo, sin menú de capas: Esri no pide API key ni Referer.
+  L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 19, attribution: "Tiles &copy; Esri" }
+  ).addTo(map).on("tileerror", ev => { if (ev.tile) ev.tile.style.visibility = "hidden"; });
 } else {
   const el = document.getElementById("map");
-  el.style.cssText = "height:auto;padding:24px;border:1px dashed var(--axis);border-radius:8px;color:var(--text-secondary);font-size:0.875rem";
-  el.textContent = "No se pudo cargar Leaflet desde el CDN, así que el mapa no se dibujó. El resto del tablero sí funciona.";
+  el.style.cssText = "height:auto;padding:22px;border:1px dashed var(--linea);border-radius:10px;color:var(--ink-2);font-size:0.875rem";
+  el.textContent = "No se pudo cargar el mapa. El resto de la información sí funciona.";
 }
 
 let layer = null, marcadores = [], yoMarker = null, miPos = null;
 let current = null;
 if (HAS_MAP) map.on("zoomend", etiquetas);
 
-// --- color: degradado continuo entre la más barata y la más cara del día ----
+// --- color: degradado continuo entre la más barata y la más cara ------------
 const hex2rgb = h => [1,3,5].map(i => parseInt(h.slice(i, i+2), 16));
-const mix = (a, b, t) => a.map((v,i) => Math.round(v + (b[i]-v)*t));
+const mezcla = (a, b, t) => a.map((v,i) => Math.round(v + (b[i]-v)*t));
 const rgb = c => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 function colorFor(precio, min, max) {
   const A = hex2rgb(css("--barato")), M = hex2rgb(css("--neutro")), B = hex2rgb(css("--caro"));
-  const t = max > min ? (precio - min) / (max - min) : 0.5;   // 0 = la más barata
-  return t <= 0.5 ? rgb(mix(A, M, t * 2)) : rgb(mix(M, B, (t - 0.5) * 2));
+  const t = max > min ? Math.min(1, Math.max(0, (precio - min) / (max - min))) : 0.5;
+  return t <= 0.5 ? rgb(mezcla(A, M, t * 2)) : rgb(mezcla(M, B, (t - 0.5) * 2));
 }
 
-const km = (aLat, aLon, bLat, bLon) => {           // haversine, igual que en Python
+const km = (aLat, aLon, bLat, bLon) => {
   const R = 6371, r = Math.PI/180;
   const p1 = aLat*r, p2 = bLat*r;
   const h = Math.sin((p2-p1)/2)**2 + Math.cos(p1)*Math.cos(p2)*Math.sin((bLon-aLon)*r/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 };
-
-function render(fuel) {
-  current = fuel;
-  const d = DATA.fuels[fuel], est = d.estaciones;
-  const barata = est.reduce((a,b) => b.precio < a.precio ? b : a);
-  const cara   = est.reduce((a,b) => b.precio > a.precio ? b : a);
-  const mejor  = est.filter(e => e.mejor).sort((a,b) => b.mejor.ahorro - a.mejor.ahorro)[0];
-
-  document.querySelectorAll("#fuelFilter button").forEach(b =>
-    b.setAttribute("aria-pressed", String(b.dataset.fuel === fuel)));
-
-  document.getElementById("kpis").innerHTML = [
-    ["Más barata", mx(barata.precio), barata.nombre],
-    ["Mediana de la ciudad", mx(d.mediana), d.n + " estaciones"],
-    ["Más cara", mx(cara.precio), cara.nombre],
-    ["Dispersión", mx(d.max - d.min) + " /L", mxr((d.max - d.min) * DATA.params.tanque) + " por tanque"],
-    ["Mayor ahorro con desvío", mejor ? mxr(mejor.mejor.ahorro) : "—",
-      mejor ? "si cargas en " + mejor.nombre : "sin alternativa cercana"],
-  ].map(([k,v,n]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join("");
-
-  const v = miPos ? vecindario(d) : null;
-  document.getElementById("legMin").textContent =
-    (v ? "La más barata de tus " + DATA.params.cercanas + " más cercanas " : "La más barata ") + mx(v ? v.min : d.min);
-  document.getElementById("legMax").textContent =
-    mx(v ? v.max : d.max) + (v ? " la más cara de esas" : " la más cara");
-
-  if (HAS_MAP) drawMap(d);
-  hist(est.map(e => e.precio), d.mediana);
-  if (miPos) cercanas(d);
-
-  document.getElementById("tsave").innerHTML = est
-    .filter(e => e.mejor).sort((a,b) => b.mejor.ahorro - a.mejor.ahorro).slice(0,15)
-    .map(e => `<tr>
-      <td>${e.nombre}</td><td class="num">${mx(e.precio)}</td>
-      <td>${e.mejor.alt}</td><td class="num">${mx(e.mejor.alt_precio)}</td>
-      <td class="num">${e.mejor.km.toFixed(1)}</td>
-      <td class="num"><b>${mxr(e.mejor.ahorro)}</b></td>
-    </tr>`).join("") || `<tr><td colspan="6">Sin alternativas dentro de ${DATA.params.radio} km.</td></tr>`;
-
-  document.getElementById("tbody").innerHTML = est
-    .slice().sort((a,b) => a.precio - b.precio).slice(0,15)
-    .map((e,i) => `<tr>
-      <td class="num">${i+1}</td><td>${e.nombre}</td><td class="num">${mx(e.precio)}</td>
-      <td class="num">${e.vs_mediana > 0 ? "−" + e.vs_mediana.toFixed(2) : "+" + (-e.vs_mediana).toFixed(2)}</td>
-    </tr>`).join("");
-}
 
 // Las N más cercanas a ti. Sin ubicación, no hay "cercanas".
 function vecindario(d) {
@@ -552,31 +545,81 @@ function vecindario(d) {
     .sort((a,b) => a.dist - b.dist)
     .slice(0, DATA.params.cercanas);
   const precios = orden.map(o => o.e.precio);
-  return {
-    ids: new Set(orden.map(o => o.e.id)),
-    min: Math.min(...precios), max: Math.max(...precios),
-    dists: new Map(orden.map(o => [o.e.id, o.dist])),
-  };
+  return { ids: new Set(orden.map(o => o.e.id)),
+           min: Math.min(...precios), max: Math.max(...precios) };
 }
 
-// El desglose completo de una llenada, para que "ahorras $X" no sea un número
-// que cae del cielo: es lo que dejas de pagar por llenar el mismo tanque allá,
-// ya restando la gasolina que quemas en el desvío.
 function recibo(e) {
   const T = DATA.params.tanque, m = e.mejor;
   const aqui = Math.round(e.precio * T);
   const alla = Math.round(m.alt_precio * T);
   const desvio = Math.round((2 * m.km / DATA.params.rendimiento) * m.alt_precio);
-  // El total se saca de los mismos números redondeados que ves, para que la
-  // resta cuadre en pantalla y no sobre o falte un peso.
   return `<div class="save">
-    <b style="display:inline">Te conviene ir a ${m.alt}</b>, a ${m.km} km
+    <b>Te conviene ir a ${m.alt}</b>, a ${m.km} km
     <table class="recibo">
       <tr><td>Llenar ${T} L aquí</td><td>${mxr(aqui)}</td></tr>
       <tr><td>Llenar ${T} L allá</td><td>−${mxr(alla)}</td></tr>
-      <tr><td>Gasolina del desvío (${(2*m.km).toFixed(1)} km)</td><td>−${mxr(desvio)}</td></tr>
+      <tr><td>Gasolina del desvío</td><td>−${mxr(desvio)}</td></tr>
       <tr class="tot"><td>Te queda en la bolsa</td><td>${mxr(aqui - alla - desvio)}</td></tr>
     </table></div>`;
+}
+
+function render(fuel) {
+  current = fuel;
+  const d = DATA.fuels[fuel], est = d.estaciones;
+  const barata = est.reduce((a,b) => b.precio < a.precio ? b : a);
+  const cara   = est.reduce((a,b) => b.precio > a.precio ? b : a);
+  const T = DATA.params.tanque;
+
+  document.querySelectorAll("#fuelFilter button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.fuel === fuel)));
+
+  document.getElementById("kpis").innerHTML = [
+    ["barata", "La más barata", mx(d.min), barata.nombre],
+    ["", "Precio normal", mx(d.mediana), d.n + " gasolineras"],
+    ["", "La más cara", mx(d.max), cara.nombre],
+  ].map(([cl,k,v,n]) =>
+    `<div class="kpi ${cl}"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`
+  ).join("");
+
+  // El número grande: qué te cuesta equivocarte de gasolinera.
+  document.getElementById("heroCifra").textContent = mxr((d.max - d.min) * T);
+  document.getElementById("heroPie").textContent =
+    "Eso es lo que hay de diferencia entre llenar " + T +
+    " litros en la gasolinera más cara de León y en la más barata. Es el mismo tanque.";
+  document.getElementById("rMin").textContent = mx(d.min);
+  document.getElementById("rMed").textContent = mx(d.mediana);
+  document.getElementById("rMax").textContent = mx(d.max);
+  const pos = d.max > d.min ? (d.mediana - d.min) / (d.max - d.min) : 0.5;
+  document.getElementById("marcaMed").style.left =
+    "calc(" + (pos * 100).toFixed(1) + "% - 1.5px)";
+
+  const v = vecindario(d);
+  document.getElementById("legMin").textContent = mx(v ? v.min : d.min);
+  document.getElementById("legMax").textContent = mx(v ? v.max : d.max);
+
+  if (HAS_MAP) drawMap(d);
+  if (miPos) cercanas(d);
+
+  // Consejos de movimiento, como tarjetas (una tabla de 6 columnas no cabe
+  // en un teléfono sin obligar a deslizar de lado).
+  document.getElementById("consejos").innerHTML = est
+    .filter(e => e.mejor).sort((a,b) => b.mejor.ahorro - a.mejor.ahorro).slice(0,8)
+    .map(e => `<div class="consejo">
+        <div class="lab">Si cargas en</div>
+        <div class="est"><span class="nom">${e.nombre}</span><span class="pre">${mx(e.precio)}</span></div>
+        <div class="flecha">↓ muévete ${e.mejor.km.toFixed(1)} km</div>
+        <div class="lab">Mejor ve a</div>
+        <div class="est dest"><span class="nom">${e.mejor.alt}</span><span class="pre">${mx(e.mejor.alt_precio)}</span></div>
+        <div class="total"><span>Te queda en la bolsa</span><b>${mxr(e.mejor.ahorro)}</b></div>
+      </div>`).join("")
+    || '<p class="hint">Hoy no hay diferencias que valgan el desvío.</p>';
+
+  document.getElementById("tbody").innerHTML = est
+    .slice().sort((a,b) => a.precio - b.precio).slice(0,15)
+    .map((e,i) => `<tr>
+      <td class="num">${i+1}</td><td class="nom">${e.nombre}</td>
+      <td class="num">${mx(e.precio)}</td></tr>`).join("");
 }
 
 function drawMap(d) {
@@ -584,12 +627,7 @@ function drawMap(d) {
   if (layer) map.removeLayer(layer);
 
   const v = vecindario(d);
-  // La escala de color: si ya sé dónde estás, se calcula SOLO entre las que
-  // tienes cerca — así el azul es "la más barata de las que te sirven", no la
-  // más barata de un León que no vas a cruzar. Sin ubicación, toda la ciudad.
   const lo = v ? v.min : d.min, hi = v ? v.max : d.max;
-
-  // Etiqueta siempre visible: las cercanas si hay ubicación, si no las 6 más baratas.
   const fijas = v ? v.ids
     : new Set(est.slice().sort((a,b) => a.precio - b.precio).slice(0,6).map(e => e.id));
   marcadores = [];
@@ -601,25 +639,23 @@ function drawMap(d) {
       fillColor: dentro ? colorFor(e.precio, lo, hi) : css("--apagado"),
       fillOpacity: dentro ? 1 : 0.5,
     });
-    m.bindTooltip(mx(e.precio), {
-      permanent: true, direction: "right", className: "precio-tag", offset: [4, 0],
-    });
+    m.bindTooltip(mx(e.precio), { permanent:true, direction:"right",
+      className:"precio-tag", offset:[4,0] });
     m._fija = fijas.has(e.id);
     marcadores.push(m);
-    const s = e.mejor ? recibo(e) :
-      `<div class="save">Es la mejor opción en ${DATA.params.radio} km a la redonda.</div>`;
-    m.bindPopup(`<div class="pop"><b>${e.nombre}</b>
-      <span class="big">${mx(e.precio)}</span> /L ·
-      ${e.vs_mediana >= 0 ? e.vs_mediana.toFixed(2) + " abajo" : (-e.vs_mediana).toFixed(2) + " arriba"} de la mediana
-      ${s}</div>`, { maxWidth: 260 });
+    const s = e.mejor ? recibo(e)
+      : `<div class="save">Es la mejor opción en ${DATA.params.radio} km a la redonda.</div>`;
+    m.bindPopup(`<div class="pop"><b class="tit">${e.nombre}</b>
+      <span class="big">${mx(e.precio)}</span> por litro ${s}</div>`, { maxWidth: 250 });
     return m;
   })).addTo(map);
-  map.fitBounds(L.latLngBounds(est.map(e => [e.lat, e.lon])).pad(0.05));
-  if (miPos) marcaYo();
+
+  // Sin ubicación, encuadra la ciudad; con ubicación, tu zona.
+  if (miPos) { marcaYo(); map.setView([miPos.lat, miPos.lon], 14); }
+  else map.setView(CENTRO_LEON, 12);
   etiquetas();
 }
 
-// Etiquetas: solo las fijas hasta zoom 14; de ahí en adelante, todas.
 function etiquetas() {
   const todas = map.getZoom() >= 14;
   marcadores.forEach(m => {
@@ -632,103 +668,70 @@ function etiquetas() {
 function marcaYo() {
   if (yoMarker) map.removeLayer(yoMarker);
   yoMarker = L.circleMarker([miPos.lat, miPos.lon], {
-    radius: 9, weight: 3, color: "#ffffff", fillColor: "#0b0b0b", fillOpacity: 1,
-  }).bindTooltip("Estás aquí", { permanent: true, direction: "top", className: "precio-tag" });
+    radius: 9, weight: 3, color: "#ffffff", fillColor: "#12241c", fillOpacity: 1,
+  }).bindTooltip("Estás aquí", { permanent:true, direction:"top", className:"precio-tag" });
   yoMarker.addTo(map);
 }
 
-// --- "las que me van quedando más cerca y más baratas" -----------------------
-// Es la frontera de Pareto: recorres las estaciones de más cerca a más lejos y
-// te quedas solo con las que rompen el récord de precio más barato hasta ahí.
-// Una estación más lejana Y más cara que otra ya vista no tiene ningún caso.
+// La frontera de Pareto: de más cerca a más lejos, quedándote solo con las que
+// rompen el récord de precio. Si una está más lejos Y más cara, sobra.
 function cercanas(d) {
   const orden = d.estaciones
     .map(e => ({ ...e, dist: km(miPos.lat, miPos.lon, e.lat, e.lon) }))
     .sort((a,b) => a.dist - b.dist);
-
   const masCercana = orden[0];
+
   const frontera = [];
   let record = Infinity;
-  for (const e of orden) {
-    if (e.precio < record) { record = e.precio; frontera.push(e); }
-  }
+  for (const e of orden) if (e.precio < record) { record = e.precio; frontera.push(e); }
 
-  document.getElementById("tcerca").innerHTML = frontera.slice(0, 12).map(e => {
-    // Ahorro neto contra quedarte en la que ya tienes más cerca.
+  document.getElementById("listaCerca").innerHTML = frontera.slice(0, 10).map(e => {
     const extra = Math.max(0, e.dist - masCercana.dist);
     const neto = (masCercana.precio - e.precio) * DATA.params.tanque
                - (2 * extra / DATA.params.rendimiento) * e.precio;
-    const esLaCercana = e.id === masCercana.id;
-    return `<tr>
-      <td class="${esLaCercana ? "yo" : ""}">${e.nombre}${esLaCercana ? " · la que tienes más cerca" : ""}</td>
-      <td class="num">${e.dist.toFixed(1)} km</td>
-      <td class="num">${mx(e.precio)}</td>
-      <td class="num">${esLaCercana ? "—" : (neto > 0 ? "<b>" + mxr(neto) + "</b>" : "no compensa")}</td>
-    </tr>`;
+    const esTuya = e.id === masCercana.id;
+    return `<li class="${esTuya ? "tuya" : ""}">
+      <div class="izq">
+        <div class="nom">${e.nombre}</div>
+        <div class="meta">${e.dist.toFixed(1)} km · ${mx(e.precio)} por litro</div>
+      </div>
+      <div class="der">${esTuya
+        ? '<small>la que tienes<br>más cerca</small>'
+        : (neto > 0 ? "<b>" + mxr(neto) + "</b><small>te queda</small>"
+                    : '<small>no compensa<br>el desvío</small>')}</div>
+    </li>`;
   }).join("");
   document.getElementById("cardCerca").hidden = false;
 }
 
 document.getElementById("btnGeo").addEventListener("click", () => {
   const msg = document.getElementById("geoMsg");
-  if (!navigator.geolocation) { msg.textContent = "Tu navegador no da ubicación."; return; }
-  msg.textContent = "Buscando tu ubicación...";
+  const barra = document.getElementById("geobar");
+  msg.hidden = false;
+  if (!navigator.geolocation) { msg.textContent = "Tu teléfono no está dando la ubicación."; return; }
+  msg.textContent = "Buscando dónde estás...";
   navigator.geolocation.getCurrentPosition(
     p => {
       miPos = { lat: p.coords.latitude, lon: p.coords.longitude };
-      msg.textContent = "Listo. El color ahora compara solo entre tus "
+      barra.hidden = true;                    // ya no hace falta el botón
+      msg.textContent = "Listo. Los colores ahora comparan solo entre tus "
         + DATA.params.cercanas + " gasolineras más cercanas.";
-      render(current);   // redibuja con la escala de color local
+      render(current);
     },
     err => {
       msg.textContent = err.code === 1
-        ? "No diste permiso de ubicación."
-        : "No pude obtener tu ubicación. Ojo: el navegador solo la da por https o localhost, no con el archivo abierto directo (file://). Sirve la carpeta con: python -m http.server 8000";
+        ? "No diste permiso de ubicación. Puedes activarlo en los ajustes del navegador."
+        : "No pude obtener tu ubicación. Inténtalo de nuevo en un momento.";
     },
     { enableHighAccuracy: true, timeout: 10000 }
   );
 });
 
-function hist(prices, mediana) {
-  const W = 900, H = 215, P = {t:26, r:12, b:28, l:40};
-  const lo = Math.min(...prices), hi = Math.max(...prices);
-  const NB = 18, w = (hi - lo) / NB || 1;
-  const bins = Array.from({length:NB}, (_,i) => ({x0: lo + i*w, x1: lo + (i+1)*w, n:0}));
-  prices.forEach(p => bins[Math.min(NB-1, Math.floor((p-lo)/w))].n++);
-  const maxN = Math.max(...bins.map(b => b.n));
-  const X = v => P.l + (v - lo) / (hi - lo || 1) * (W - P.l - P.r);
-  const Y = n => H - P.b - n / maxN * (H - P.t - P.b);
-  const bw = (W - P.l - P.r) / NB;
-
-  const bars = bins.map(b => {
-    const h = H - P.b - Y(b.n);
-    return `<rect x="${X(b.x0)+1}" y="${Y(b.n)}" width="${Math.max(1,bw-2)}" height="${h}"
-      rx="${Math.min(4, h/2)}" fill="var(--s1)"><title>${b.n} gasolineras entre $${b.x0.toFixed(2)} y $${b.x1.toFixed(2)}</title></rect>`;
-  }).join("");
-  const medX = X(mediana), flip = medX > W * 0.7;
-
-  document.getElementById("hist").innerHTML =
-    `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
-          aria-label="Distribución de precios: ${prices.length} gasolineras entre $${lo.toFixed(2)} y $${hi.toFixed(2)}, mediana $${mediana.toFixed(2)}">
-      <text x="${P.l}" y="${P.t+2}" fill="var(--muted)" font-size="11">gasolineras</text>
-      <text x="${P.l-8}" y="${Y(maxN)+10}" fill="var(--muted)" font-size="11" text-anchor="end">${maxN}</text>
-      <text x="${P.l-8}" y="${H-P.b}" fill="var(--muted)" font-size="11" text-anchor="end">0</text>
-      <line x1="${P.l}" y1="${H-P.b}" x2="${W-P.r}" y2="${H-P.b}" stroke="var(--axis)" stroke-width="1"/>
-      ${bars}
-      <line x1="${medX}" y1="${P.t+8}" x2="${medX}" y2="${H-P.b}"
-            stroke="var(--text-primary)" stroke-width="2" stroke-dasharray="4 3"/>
-      <text x="${medX + (flip ? -8 : 8)}" y="${P.t+2}" fill="var(--text-primary)" font-size="11"
-            font-weight="600" text-anchor="${flip ? "end" : "start"}">mediana $${mediana.toFixed(2)}</text>
-      <text x="${P.l}" y="${H-8}" fill="var(--muted)" font-size="11">$${lo.toFixed(2)}</text>
-      <text x="${W-P.r}" y="${H-8}" fill="var(--muted)" font-size="11" text-anchor="end">$${hi.toFixed(2)}</text>
-    </svg>`;
-}
-
 function arranca(datos) {
   DATA = datos;
   document.getElementById("sub").textContent =
-    "Corte del " + DATA.corte + " · ahorro calculado para un tanque de " + DATA.params.tanque +
-    " L a " + DATA.params.rendimiento + " km/L, con vecinas a " + DATA.params.radio + " km a la redonda.";
+    "Precios del " + DATA.corte + ". Las cuentas son para un tanque de " +
+    DATA.params.tanque + " litros en un coche que hace " + DATA.params.rendimiento + " km por litro.";
 
   document.getElementById("fuelFilter").innerHTML = Object.entries(DATA.fuels)
     .map(([k,v]) => `<button data-fuel="${k}" aria-pressed="false">${v.label}</button>`).join("");
@@ -739,8 +742,6 @@ function arranca(datos) {
   render(current);
 }
 
-// Sin datos embebidos, se piden al servidor. El ?v= evita que el navegador
-// devuelva los precios de ayer desde su cache.
 if (DATA_EMBEBIDA) {
   arranca(DATA_EMBEBIDA);
 } else {
@@ -753,17 +754,12 @@ if (DATA_EMBEBIDA) {
     });
 }
 
-// Instalable en el teléfono. Solo aplica servido por http/https, no con el
-// archivo abierto directo.
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () =>
     navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
-// ---- Invitación a instalar -------------------------------------------------
-// Android/Chrome avisa con 'beforeinstallprompt' cuando la app cumple los
-// requisitos, y ahí se puede lanzar el diálogo nativo. Safari en iPhone no
-// tiene ese evento: ahí solo se puede explicar dónde está la opción.
+// ---- invitación a instalar -------------------------------------------------
 (() => {
   const caja = document.getElementById("instalar");
   const btn = document.getElementById("btnInstalar");
@@ -780,17 +776,14 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
     && !/CriOS|FxiOS/.test(navigator.userAgent);
 
   window.addEventListener("beforeinstallprompt", e => {
-    e.preventDefault();
-    evento = e;
+    e.preventDefault(); evento = e;
     como.textContent = "Queda con su ícono, como cualquier app.";
-    btn.hidden = false;
-    caja.classList.add("ver");
+    btn.hidden = false; caja.classList.add("ver");
   });
 
-  if (esIOS) {                     // Safari: se explica, no se puede lanzar
-    como.textContent = "Toca Compartir abajo y luego \\u00abAgregar a inicio\\u00bb.";
-    btn.hidden = true;
-    caja.classList.add("ver");
+  if (esIOS) {
+    como.textContent = "Toca Compartir abajo y luego «Agregar a inicio».";
+    btn.hidden = true; caja.classList.add("ver");
   }
 
   btn.addEventListener("click", async () => {
@@ -811,7 +804,7 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
 </script>
 </body>
 </html>
-"""
+'''
 
 
 # ======================================================================== PWA
@@ -825,8 +818,8 @@ MANIFEST = {
     "scope": ".",
     "display": "standalone",
     "orientation": "portrait-primary",
-    "background_color": "#f9f9f7",
-    "theme_color": "#2a78d6",
+    "background_color": "#0c1f18",
+    "theme_color": "#0c1f18",
     "lang": "es-MX",
     "icons": [
         {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
@@ -854,8 +847,8 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
 
-  // Los precios: SIEMPRE de la red, para que la app nunca muestre los de ayer.
-  // Si no hay señal, los últimos que se guardaron.
+  // Los precios: SIEMPRE de la red, para que nunca se muestren los de ayer.
+  // Sin señal, los últimos que se guardaron.
   if (new URL(req.url).pathname.endsWith("/datos.json")) {
     e.respondWith(
       fetch(req).then(r => {
@@ -867,7 +860,6 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // La página en sí casi no cambia, pero igual se revalida contra la red.
   if (req.mode === "navigate") {
     e.respondWith(
       fetch(req).then(r => {
@@ -879,7 +871,6 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // Todo lo demás (iconos, Leaflet, tiles): del cache si está, si no de la red.
   e.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(r => {
       if (r.ok && (new URL(req.url).origin === location.origin)) {
@@ -891,7 +882,6 @@ self.addEventListener("fetch", e => {
   );
 });
 """
-
 
 WORKFLOW = """# Recolecta los precios y republica el sitio, solo, en la nube.
 # Tu computadora no necesita estar prendida.
@@ -926,7 +916,6 @@ jobs:
 
       # Sin 'cache: pip' a propósito: ese caché exige que exista un
       # requirements.txt en el repo y, si falta, la corrida entera falla.
-      # Instalar de cero tarda ~30 s y nunca truena.
       - run: pip install --quiet requests pandas pyarrow
 
       - name: Bajar el corte de ahora
@@ -939,7 +928,7 @@ jobs:
           git add data/
           git diff --staged --quiet && exit 0
           git commit -m "precios $(date -u +'%Y-%m-%d %H:%M') UTC"
-          git pull --rebase --autostash || true   # por si el repo avanzó mientras tanto
+          git pull --rebase --autostash || true
           git push
 
       - name: Armar el sitio
@@ -963,7 +952,7 @@ jobs:
 PASOS = """
 ================================ QUÉ SIGUE ================================
 
-Ya quedaron los dos archivos. Ahora, una sola vez:
+Ya quedaron los archivos. Ahora, una sola vez:
 
  1. Crea un repo PÚBLICO en github.com (por ejemplo: gasolina-leon).
 
@@ -976,19 +965,15 @@ Ya quedaron los dos archivos. Ahora, una sola vez:
       git remote add origin https://github.com/TU-USUARIO/gasolina-leon.git
       git push -u origin main
 
- 3. En el repo, ve a Settings > Pages y en "Source" elige GitHub Actions.
+ 3. En el repo: Settings > Actions > General > Workflow permissions,
+    elige "Read and write permissions" y guarda.
 
- 4. Ve a la pestaña Actions, escoge "precios" y dale "Run workflow".
-    Esa primera corrida a mano te confirma que todo jala.
+ 4. En el repo: Settings > Pages, en "Source" elige GitHub Actions.
+
+ 5. Pestaña Actions > "precios" > "Run workflow", para probar.
 
 Listo. De ahí en adelante se recolecta y se republica solo, 6 veces al día.
 Tu sitio queda en:  https://TU-USUARIO.github.io/gasolina-leon/
-
-Dos notas:
- - El repo debe ser público para que Pages y Actions te salgan gratis.
-   Como beneficio, tu histórico de precios queda como dataset abierto.
- - Los horarios de GitHub no son exactos: puede retrasarse algunos minutos
-   cuando sus servidores andan ocupados. Para esto da igual.
 ===========================================================================
 """
 
@@ -1030,17 +1015,16 @@ def _png(w: int, h: int, px: bytearray) -> bytes:
 
 
 def _icono(lado: int) -> bytes:
-    """Un pin de mapa blanco sobre fondo azul. Dibujado a mano, con supersampling
-    2x para que los bordes no queden dentados."""
-    AZUL = (0x2A, 0x78, 0xD6)
-    BLANCO = (0xFF, 0xFF, 0xFF)
-    S = 2                       # muestras por lado
-    n = lado * S
-    u = n / 512.0               # todo está medido sobre un lienzo de 512
+    """Pin de mapa dorado sobre verde de León. Provisional: reemplázalo
+    poniendo tus propios icon-192.png e icon-512.png en la carpeta."""
+    FONDO = (0x14, 0x30, 0x25)
+    PIN = (0xD9, 0xA4, 0x41)
+    S = 2
+    u = (lado * S) / 512.0
 
-    cx, cy, r = 256 * u, 215 * u, 96 * u      # cabeza del pin
-    punta = 410 * u                            # dónde termina la punta
-    hueco = 40 * u                             # el agujero del centro
+    cx, cy, r = 256 * u, 215 * u, 96 * u
+    punta = 410 * u
+    hueco = 40 * u
 
     px = bytearray(lado * lado * 4)
     for y in range(lado):
@@ -1051,18 +1035,16 @@ def _icono(lado: int) -> bytes:
                     fx, fy = x * S + sx + 0.5, y * S + sy + 0.5
                     d2 = (fx - cx) ** 2 + (fy - cy) ** 2
                     if d2 <= hueco ** 2:
-                        continue                      # el agujero es azul
+                        continue
                     en_cabeza = d2 <= r ** 2
-                    # La punta: un triángulo que se cierra desde la cabeza.
                     en_punta = False
                     if cy < fy <= punta:
                         t = (fy - cy) / (punta - cy)
-                        medio = r * (1 - t) ** 0.85
-                        en_punta = abs(fx - cx) <= medio
+                        en_punta = abs(fx - cx) <= r * (1 - t) ** 0.85
                     if en_cabeza or en_punta:
                         dentro += 1
             a = dentro / (S * S)
-            col = tuple(round(AZUL[i] + (BLANCO[i] - AZUL[i]) * a) for i in range(3))
+            col = tuple(round(FONDO[i] + (PIN[i] - FONDO[i]) * a) for i in range(3))
             i = (y * lado + x) * 4
             px[i:i + 4] = bytes(col) + b"\xff"
     return _png(lado, lado, px)
@@ -1083,18 +1065,22 @@ def sitio(data_dir: Path, carpeta: Path, radio, tanque, rend, cercanas) -> Path:
 
     (carpeta / "manifest.webmanifest").write_text(
         json.dumps(MANIFEST, ensure_ascii=False, indent=2), encoding="utf-8")
-    # El service worker no se versiona con el corte: la página ya no cambia,
-    # solo el JSON, que siempre se pide a la red.
-    (carpeta / "sw.js").write_text(SW_JS.replace("__VER__", "1"), encoding="utf-8")
+    (carpeta / "sw.js").write_text(SW_JS.replace("__VER__", "2"), encoding="utf-8")
 
+    # Íconos: si pones los tuyos como icon-192.png / icon-512.png junto a este
+    # script, se usan esos. Si no, se dibuja uno provisional.
     for lado in (192, 512):
-        destino = carpeta / f"icon-{lado}.png"
-        if not destino.exists():            # los íconos no cambian; no los rehagas
+        nombre = f"icon-{lado}.png"
+        propio = Path(__file__).resolve().parent / nombre
+        destino = carpeta / nombre
+        if propio.exists() and propio.resolve() != destino.resolve():
+            destino.write_bytes(propio.read_bytes())
+            print(f"  icono tuyo -> {nombre}")
+        else:
             destino.write_bytes(_icono(lado))
-            print(f"  icono -> {destino.name}")
+            print(f"  icono provisional -> {nombre}")
 
     print(f"\n  Carpeta lista para subir: {carpeta.resolve()}")
-    print("  Sube TODO su contenido a tu hosting (index.html, manifest, sw.js, iconos).")
     return carpeta / "index.html"
 
 
