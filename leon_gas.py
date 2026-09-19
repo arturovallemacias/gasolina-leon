@@ -299,6 +299,17 @@ HTML = """<!DOCTYPE html>
     padding:1px 4px; border-radius:3px; margin-left:2px;
   }
   .leaflet-tooltip.precio-tag::before { display:none; }
+  /* Invitación a guardar la app en el teléfono */
+  .instalar { display:none; gap:12px; align-items:center; margin-bottom:16px; padding:12px 14px;
+    background:var(--surface-1); border:1px solid var(--border); border-left:4px solid var(--s2);
+    border-radius:10px; }
+  .instalar.ver { display:flex; }
+  .instalar .txt { flex:1 1 200px; font-size:0.8125rem; color:var(--text-secondary); line-height:1.4; }
+  .instalar .txt b { display:block; color:var(--text-primary); font-size:0.9rem; margin-bottom:1px; }
+  .instalar button { font:inherit; font-size:0.875rem; font-weight:600; padding:8px 16px;
+    cursor:pointer; background:var(--s2); color:#fff; border:none; border-radius:8px; white-space:nowrap; }
+  .instalar .cerrar { background:none; color:var(--muted); font-size:1.1rem; padding:4px 8px; font-weight:400; }
+
   .geobar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
   .geobar button { font:inherit; font-size:0.875rem; font-weight:600; padding:8px 16px; cursor:pointer;
     background:var(--s2); color:#fff; border:none; border-radius:8px; }
@@ -347,6 +358,12 @@ HTML = """<!DOCTYPE html>
 <div class="wrap">
   <h1>Gasolina en León</h1>
   <p class="sub" id="sub"></p>
+
+  <div class="instalar" id="instalar">
+    <div class="txt"><b>Guárdala en tu teléfono</b><span id="instalarComo"></span></div>
+    <button id="btnInstalar" type="button">Instalar</button>
+    <button class="cerrar" id="cerrarInstalar" type="button" aria-label="Cerrar">✕</button>
+  </div>
 
   <div class="filters" id="fuelFilter" role="group" aria-label="Combustible"></div>
   <div class="kpis" id="kpis"></div>
@@ -742,6 +759,55 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () =>
     navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
+
+// ---- Invitación a instalar -------------------------------------------------
+// Android/Chrome avisa con 'beforeinstallprompt' cuando la app cumple los
+// requisitos, y ahí se puede lanzar el diálogo nativo. Safari en iPhone no
+// tiene ese evento: ahí solo se puede explicar dónde está la opción.
+(() => {
+  const caja = document.getElementById("instalar");
+  const btn = document.getElementById("btnInstalar");
+  const como = document.getElementById("instalarComo");
+  let evento = null;
+
+  const yaInstalada = matchMedia("(display-mode: standalone)").matches
+    || navigator.standalone === true;
+  let rechazada = false;
+  try { rechazada = localStorage.getItem("instalar-no") === "1"; } catch (e) {}
+  if (yaInstalada || rechazada) return;
+
+  const esIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    && !/CriOS|FxiOS/.test(navigator.userAgent);
+
+  window.addEventListener("beforeinstallprompt", e => {
+    e.preventDefault();
+    evento = e;
+    como.textContent = "Queda con su ícono, como cualquier app.";
+    btn.hidden = false;
+    caja.classList.add("ver");
+  });
+
+  if (esIOS) {                     // Safari: se explica, no se puede lanzar
+    como.textContent = "Toca Compartir abajo y luego \\u00abAgregar a inicio\\u00bb.";
+    btn.hidden = true;
+    caja.classList.add("ver");
+  }
+
+  btn.addEventListener("click", async () => {
+    if (!evento) return;
+    evento.prompt();
+    const { outcome } = await evento.userChoice;
+    evento = null;
+    if (outcome === "accepted") caja.classList.remove("ver");
+  });
+
+  document.getElementById("cerrarInstalar").addEventListener("click", () => {
+    caja.classList.remove("ver");
+    try { localStorage.setItem("instalar-no", "1"); } catch (e) {}
+  });
+
+  window.addEventListener("appinstalled", () => caja.classList.remove("ver"));
+})();
 </script>
 </body>
 </html>
@@ -857,9 +923,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
-      - run: pip install requests pandas pyarrow
+      # Sin 'cache: pip' a propósito: ese caché exige que exista un
+      # requirements.txt en el repo y, si falta, la corrida entera falla.
+      # Instalar de cero tarda ~30 s y nunca truena.
+      - run: pip install --quiet requests pandas pyarrow
 
       - name: Bajar el corte de ahora
         run: python leon_gas.py bajar --data ./data
